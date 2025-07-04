@@ -28,7 +28,7 @@ from telegram.ext import (
     filters,
     ChatMemberHandler,
 )
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 import os
 import json
 
@@ -54,11 +54,31 @@ bookingsDB = {}
 
 DB_FILE = "bookings.json"
 
-TIME_SLOTS = [
-    "08:00–09:30", "09:30–11:00", "11:00–12:30",
-    "12:30–14:00", "14:00–15:30", "15:30–17:00",
-    "17:00–18:30", "18:30–20:00", "20:00–21:30"
-]
+def generate_time_slots_for_day(day_str: str) -> list[str]:
+    """
+    Генерирует 1.5-часовые слоты с 10:00 до 22:00.
+    Включает время сиесты (15:00–17:00), но их пометим отдельно.
+    """
+    day_date = datetime.strptime(day_str, "%d/%m/%Y").date()
+    now = datetime.now()
+
+    open_dt      = datetime.combine(day_date, time(10, 0))
+    siesta_start = datetime.combine(day_date, time(15, 0))
+    siesta_end   = datetime.combine(day_date, time(17, 0))
+    close_dt     = datetime.combine(day_date, time(22, 0))
+    delta = timedelta(hours=1, minutes=30)
+
+    slots: list[str] = []
+    cur = open_dt
+    while cur + delta <= close_dt:
+        end = cur + delta
+        # пропускаем прошедшие слоты, если это сегодня
+        if day_date == now.date() and cur < now:
+            cur = end
+            continue
+        slots.append(f"{cur.strftime('%H:%M')}–{end.strftime('%H:%M')}")
+        cur = end
+    return slots
 
 def get_date_string(offset):
     return (datetime.now() + timedelta(days=offset)).strftime("%d/%m/%Y")
@@ -144,18 +164,31 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             day = get_date_string(2)
 
-        bookings[chat_id] = {"day": day}
-        keyboard = []
-        for slot in TIME_SLOTS:
-            if is_taken(day, slot):
-                keyboard.append([f"🟥 {slot}"])
-            else:
-                keyboard.append([f"🟩 {slot}"])
+        # после того, как вы сохранили выбранный день
+bookings[chat_id] = {"day": day}
 
-        await update.message.reply_text(
-            "🕒 Elige una hora:",
-            reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
-        )
+# генерируем слоты
+slots = generate_time_slots_for_day(day)
+
+# строим клавиатуру
+keyboard = []
+for slot in slots:
+    # парсим начало слота
+    start_h, start_m = map(int, slot.split("–")[0].split(":"))
+    st = time(start_h, start_m)
+
+    if is_taken(day, slot):
+        keyboard.append([f"🟥 {slot}"])
+    elif time(15, 0) <= st < time(17, 0):
+        keyboard.append([f"🛏️ {slot}"])
+    else:
+        keyboard.append([f"🟩 {slot}"])
+
+# отправляем пользователю
+await update.message.reply_text(
+    "🕒 Elige una hora:",
+    reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
+)
         return
 
     if state.get("day") and not state.get("time"):
@@ -232,6 +265,30 @@ if __name__ == '__main__':
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("cancelar", cancelar))
+    # ...все ваши импорты, функции и обработчики выше...
+
+# --- Handler для слотов сиесты --- #
+async def on_siesta_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text(
+        "Lo siento, este horario no está disponible debido a la siesta. Por favor, elige otro horario."
+    )
+
+if __name__ == '__main__':
+    load_db()
+    cleanup_old_bookings()
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("cancelar", cancelar))
+
+    # Регистрируем handler сиесты ДО общего текстового!
+    app.add_handler(
+        MessageHandler(
+            filters.TEXT & filters.Regex(r"^🛏️"),
+            on_siesta_choice
+        )
+    )
+
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle))
     app.add_handler(MessageHandler(filters.COMMAND, unknown))
     app.add_handler(ChatMemberHandler(welcome_new_member, ChatMemberHandler.CHAT_MEMBER))
