@@ -41,8 +41,8 @@ def generate_time_slots_for_day(day_str: str) -> list[str]:
     day_date = datetime.strptime(day_str, "%d/%m/%Y").date()
     now = datetime.now()
     open_dt      = datetime.combine(day_date, time(10, 0))
-    siesta_start = datetime.combine(day_date, time(15, 0))
-    siesta_end   = datetime.combine(day_date, time(17, 0))
+    siesta_start = datetime.combine(day_date, time(14, 30))
+    siesta_end   = datetime.combine(day_date, time(17, 30))
     close_dt     = datetime.combine(day_date, time(22, 0))
     delta = timedelta(hours=1, minutes=30)
     slots = []
