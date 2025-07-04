@@ -165,30 +165,30 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
             day = get_date_string(2)
 
         # после того, как вы сохранили выбранный день
-bookings[chat_id] = {"day": day}
+        bookings[chat_id] = {"day": day}
 
-# генерируем слоты
-slots = generate_time_slots_for_day(day)
+        # генерируем слоты
+        slots = generate_time_slots_for_day(day)
 
-# строим клавиатуру
-keyboard = []
-for slot in slots:
-    # парсим начало слота
-    start_h, start_m = map(int, slot.split("–")[0].split(":"))
-    st = time(start_h, start_m)
+        # строим клавиатуру
+        keyboard = []
+        for slot in slots:
+            # парсим начало слота
+            start_h, start_m = map(int, slot.split("–")[0].split(":"))
+            st = time(start_h, start_m)
 
-    if is_taken(day, slot):
-        keyboard.append([f"🟥 {slot}"])
-    elif time(15, 0) <= st < time(17, 0):
-        keyboard.append([f"🛏️ {slot}"])
-    else:
-        keyboard.append([f"🟩 {slot}"])
+            if is_taken(day, slot):
+                keyboard.append([f"🟥 {slot}"])
+            elif time(15, 0) <= st < time(17, 0):
+                keyboard.append([f"🛏️ {slot}"])
+            else:
+                keyboard.append([f"🟩 {slot}"])
 
-# отправляем пользователю
-await update.message.reply_text(
-    "🕒 Elige una hora:",
-    reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
-)
+        # отправляем пользователю
+        await update.message.reply_text(
+            "🕒 Elige una hora:",
+            reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
+        )
 
 if state.get("day") and not state.get("time"):
     clean_text = text.replace("🟩", "").replace("🟥", "").strip()
