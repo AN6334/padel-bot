@@ -157,34 +157,37 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await cancelar(update, context)
         return
 
-if not state.get("day") and any(text.startswith(p) for p in ["Hoy", "Mañana", "Pasado mañana"]):
-    if text.startswith("Hoy"):
-        day = get_date_string(0)
-    elif text.startswith("Mañana"):
-        day = get_date_string(1)
-    else:
-        day = get_date_string(2)
-    bookings[chat_id] = {"day": day}
+async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    text = update.message.text.strip()
+    state = bookings.get(chat_id, {})
 
-    # Генерируем слоты
-    slots = generate_time_slots_for_day(day)
-    keyboard = []
-    for slot in slots:
-        start_h, start_m = map(int, slot.split("–")[0].split(":"))
-        st = time(start_h, start_m)
-        if is_taken(day, slot):
-            keyboard.append([f"🟥 {slot}"])
-        elif time(15, 0) <= st < time(17, 0):
-            keyboard.append([f"🛏️ {slot}"])
+    if not state.get("day") and any(text.startswith(p) for p in ["Hoy", "Mañana", "Pasado mañana"]):
+        if text.startswith("Hoy"):
+            day = get_date_string(0)
+        elif text.startswith("Mañana"):
+            day = get_date_string(1)
         else:
-            keyboard.append([f"🟩 {slot}"])
+            day = get_date_string(2)
+        bookings[chat_id] = {"day": day}
 
-    # Отправляем клавиатуру пользователю
-    await update.message.reply_text(
-        "🕒 Elige una hora:",
-        reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
-    )
-    return
+        slots = generate_time_slots_for_day(day)
+        keyboard = []
+        for slot in slots:
+            start_h, start_m = map(int, slot.split("–")[0].split(":"))
+            st = time(start_h, start_m)
+            if is_taken(day, slot):
+                keyboard.append([f"🟥 {slot}"])
+            elif time(15, 0) <= st < time(17, 0):
+                keyboard.append([f"🛏️ {slot}"])
+            else:
+                keyboard.append([f"🟩 {slot}"])
+
+        await update.message.reply_text(
+            "🕒 Elige una hora:",
+            reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
+        )
+        return
 
     if state.get("day") and not state.get("time"):
         clean_text = text.replace("🟩", "").replace("🟥", "").strip()
