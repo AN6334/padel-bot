@@ -212,10 +212,10 @@ return
             return
 
         set_booking(day, time, {"username": username, "piso": piso})
-        await update.message.reply_text(f"✅ ¡Reservado!\n📅 Día: {day}\n🕒 Hora: {time}\n🏠 Piso: {piso}")
+        await update.message.reply_text(f"✅ ¡Reservado!\n\n📅 Día: {day}\n🕒 Hora: {time}\n🏠 Piso: {piso}")
         await context.bot.send_message(
             chat_id=GROUP_CHAT_ID,
-            text=f"📢 Nueva reserva:\n📅 {day}\n🕒 {time}\n🏠 Piso: {piso}\n👤 Usuario: @{username}"
+            text=f"📢 Nueva reserva\n📅 Día: {day}\n🕒 Hora: {time}\n🏠 Piso: {piso}"
         )
         bookings.pop(chat_id, None)
         return
