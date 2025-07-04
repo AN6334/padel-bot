@@ -36,16 +36,18 @@ import json
 BOT_TOKEN = os.environ['BOT_TOKEN']
 GROUP_CHAT_ID = int(os.environ['GROUP_CHAT_ID'])
 
-# Удаляем все webhooks через HTTP, чтобы не было конфликтов getUpdates
-import requests
+import urllib.request, urllib.error
 
-resp = requests.get(
-    f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook?drop_pending_updates=true"
-)
-if resp.status_code == 200:
-    print("✅ Webhook deleted via HTTP")
-else:
-    print("⚠️ Failed to delete webhook:", resp.text)
+try:
+    with urllib.request.urlopen(
+        f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook?drop_pending_updates=true"
+    ) as resp:
+        if resp.status == 200:
+            print("✅ Webhook deleted via HTTP")
+        else:
+            print("⚠️ deleteWebhook returned status", resp.status)
+except Exception as e:
+    print("⚠️ Failed to delete webhook:", e)
 
 bookings = {}
 bookingsDB = {}
