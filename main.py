@@ -59,7 +59,7 @@ def start(update: Update, context: CallbackContext):
     bookings[chat_id] = {}
     keyboard = [["🎾 Reservar pista", "❌ Cancelar reserva"]]
     update.message.reply_text(
-        "🎾 ¡Reserva tu pista aquí!
+        "🎾 ¡Reserva tu pista aquí!"
 
 Pulsa /start para iniciar el proceso.
 
