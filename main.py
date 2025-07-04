@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import (
     Updater,
