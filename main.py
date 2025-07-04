@@ -189,7 +189,7 @@ await update.message.reply_text(
     "🕒 Elige una hora:",
     reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
 )
-        return
+return
 
     if state.get("day") and not state.get("time"):
         clean_text = text.replace("🟩", "").replace("🟥", "").strip()
