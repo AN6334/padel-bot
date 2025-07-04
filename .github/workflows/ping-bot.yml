@@ -1,0 +1,15 @@
+# .github/workflows/ping-bot.yml
+
+name: Ping Padel Bot
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping bot
+        run: curl --fail https://padel-bot-v77e.onrender.com/ || exit 1
