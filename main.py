@@ -1,3 +1,19 @@
+import os, threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
+
+class PingHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"OK")
+
+def start_server():
+    port = int(os.getenv("PORT", "8000"))
+    HTTPServer(("0.0.0.0", port), PingHandler).serve_forever()
+
+# Запускаем сервер в фоне, не мешает основному коду
+threading.Thread(target=start_server, daemon=True).start()
+
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import (
     ApplicationBuilder,
