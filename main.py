@@ -207,7 +207,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
             st = time(start_h, start_m)
             if is_taken(day, slot):
                 keyboard.append([f"🟥 {slot}"])
-            elif time(15, 0) <= st < time(17, 0):
+            elif time(14, 30) <= st < time(17, 30):
                 keyboard.append([f"🛏️ {slot}"])
             else:
                 keyboard.append([f"🟩 {slot}"])
