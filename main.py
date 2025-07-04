@@ -191,7 +191,7 @@ await update.message.reply_text(
 )
 return
 
-    if state.get("day") and not state.get("time"):
+        if state.get("day") and not state.get("time"):
         clean_text = text.replace("🟩", "").replace("🟥", "").strip()
         if is_taken(state["day"], clean_text):
             await update.message.reply_text("⛔ Esa hora ya está reservada.")
