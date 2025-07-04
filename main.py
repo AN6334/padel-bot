@@ -272,15 +272,20 @@ async def on_siesta_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         "Lo siento, este horario no está disponible debido a la siesta. Por favor, elige otro horario."
     )
 
+async def reservar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("ℹ️ Команда /reservar работает! (здесь будет ваша lógica)")
+
+async def cancelar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("❌ Reserva cancelada.", reply_markup=ReplyKeyboardRemove())
+
 if __name__ == '__main__':
     load_db()
     cleanup_old_bookings()
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("reservar", reservar))
     app.add_handler(CommandHandler("cancelar", cancelar))
-
-    # Регистрируем handler сиесты ДО общего текстового!
     app.add_handler(
         MessageHandler(
             filters.TEXT & filters.Regex(r"^🛏️"),
