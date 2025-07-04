@@ -230,24 +230,24 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
     if state.get("day") and state.get("time") and state.get("floor") and not state.get("name"):
-    name = text
-    day = state["day"]
-    slot = state["time"]
-    piso = state["floor"]
-    if is_taken(day, slot):
-        await update.message.reply_text("⛔ Esa hora ya está reservada.")
+        name = text
+        day = state["day"]
+        slot = state["time"]
+        piso = state["floor"]
+        if is_taken(day, slot):
+            await update.message.reply_text("⛔ Esa hora ya está reservada.")
+            bookings.pop(chat_id, None)
+            return
+        set_booking(day, slot, {"username": username, "piso": piso, "name": name})
+        await update.message.reply_text(
+            f"✅ ¡Reservado!\n\n📅 Día: {day}\n🕒 Hora: {slot}\n🏠 Piso: {piso}\n👤 Nombre: {name}"
+        )
+        await context.bot.send_message(
+            chat_id=GROUP_CHAT_ID,
+            text=f"📢 Nueva reserva\n📅 Día: {day}\n🕒 Hora: {slot}\n🏠 Piso: {piso}\n👤 Nombre: {name}"
+        )
         bookings.pop(chat_id, None)
         return
-    set_booking(day, slot, {"username": username, "piso": piso, "name": name})
-    await update.message.reply_text(
-        f"✅ ¡Reservado!\n\n📅 Día: {day}\n🕒 Hora: {slot}\n🏠 Piso: {piso}\n👤 Nombre: {name}"
-    )
-    await context.bot.send_message(
-        chat_id=GROUP_CHAT_ID,
-        text=f"📢 Nueva reserva\n📅 Día: {day}\n🕒 Hora: {slot}\n🏠 Piso: {piso}\n👤 Nombre: {name}"
-    )
-    bookings.pop(chat_id, None)
-    return
 
 # --- Запуск приложения ---
 
