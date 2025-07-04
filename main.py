@@ -190,15 +190,15 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
         )
 
-if state.get("day") and not state.get("time"):
-    clean_text = text.replace("🟩", "").replace("🟥", "").strip()
-    if is_taken(state["day"], clean_text):
-        await update.message.reply_text("⛔ Esa hora ya está reservada.")
-        return
-    elif clean_text in TIME_SLOTS:
-        bookings[chat_id]["time"] = clean_text
-        await update.message.reply_text("🏠 ¿Cuál es tu piso? (ej: 2B o 3A)")
-        return
+    if state.get("day") and not state.get("time"):
+        clean_text = text.replace("🟩", "").replace("🟥", "").strip()
+        if is_taken(state["day"], clean_text):
+            await update.message.reply_text("⛔ Esa hora ya está reservada.")
+            return
+        elif clean_text in TIME_SLOTS:
+            bookings[chat_id]["time"] = clean_text
+            await update.message.reply_text("🏠 ¿Cuál es tu piso? (ej: 2B o 3A)")
+            return
 
     if state.get("day") and state.get("time") and not state.get("floor"):
         piso = text
@@ -218,6 +218,7 @@ if state.get("day") and not state.get("time"):
         )
         bookings.pop(chat_id, None)
         return
+
 
 async def cancelar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.message.chat_id
