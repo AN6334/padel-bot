@@ -7,6 +7,11 @@ class PingHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(b"OK")
 
+    def do_HEAD(self):
+        # Отвечаем на HEAD тем же кодом, но без тела
+        self.send_response(200)
+        self.end_headers()
+
 def start_server():
     port = int(os.getenv("PORT", "8000"))
     HTTPServer(("0.0.0.0", port), PingHandler).serve_forever()
