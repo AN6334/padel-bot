@@ -244,4 +244,4 @@ if __name__ == '__main__':
     print("✅ Webhook deleted, ready for polling")
 
     print("✅ Bot listo...")
-    app.run_polling()
+app.run_polling(drop_pending_updates=True)
