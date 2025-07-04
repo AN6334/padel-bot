@@ -207,16 +207,22 @@ async def welcome_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE)
             )
         )
 
-if __name__ == '__main__':
-    load_db()
-    cleanup_old_bookings()
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
-
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("cancelar", cancelar))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle))
-    app.add_handler(MessageHandler(filters.COMMAND, unknown))
-    app.add_handler(ChatMemberHandler(welcome_new_member, ChatMemberHandler.CHAT_MEMBER))
-
-    print("✅ Bot listo...")
-    app.run_polling()
++if __name__ == '__main__':
++    load_db()
++    cleanup_old_bookings()
++    app = ApplicationBuilder().token(BOT_TOKEN).build()
++
++    app.add_handler(CommandHandler("start", start))
++    app.add_handler(CommandHandler("cancelar", cancelar))
++    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle))
++    app.add_handler(MessageHandler(filters.COMMAND, unknown))
++    app.add_handler(ChatMemberHandler(welcome_new_member, ChatMemberHandler.CHAT_MEMBER))
++
++    # Перед polling удаляем все webhooks, чтобы не было конфликтов getUpdates
++    async def on_startup():
++        await app.bot.delete_webhook(drop_pending_updates=True)
++        print("✅ Webhook deleted, ready for polling")
++
++    print("✅ Bot listo...")
++    # Запускаем polling с нашим on_startup
++    app.run_polling(on_startup=on_startup)
