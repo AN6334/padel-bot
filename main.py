@@ -229,6 +229,12 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("🏠 ¿Cuál es tu piso? (ej: 2B o 3A)")
             return
 
+    if state.get("day") and state.get("time") and not state.get("floor"):
+        piso = text
+        bookings[chat_id]["floor"] = piso
+        await update.message.reply_text("👤 ¿Cuál es tu nombre? (Name)")
+        return
+
     if state.get("day") and state.get("time") and state.get("floor") and not state.get("name"):
         name = text
         day = state["day"]
