@@ -118,7 +118,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
     )
 
-async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.message.chat_id
     text = update.message.text.strip()
     username = update.message.from_user.username or update.message.from_user.first_name
@@ -136,8 +136,9 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         chat_id=GROUP_CHAT_ID,
                         text=f"❌ Reserva cancelada:\n📅 {day}\n🕒 {time}\n👤 Usuario: @{username}"
                     )
-                    context.user_data["cancel_options"] = []
-                    return
+                context.user_data["cancel_options"] = []
+                return
+
 
     if text.startswith("🎾"):
         labels = [
