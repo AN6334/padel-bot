@@ -218,11 +218,12 @@ if __name__ == '__main__':
     app.add_handler(MessageHandler(filters.COMMAND, unknown))
     app.add_handler(ChatMemberHandler(welcome_new_member, ChatMemberHandler.CHAT_MEMBER))
 
-    # Удаляем все webhooks перед polling, чтобы не было конфликта getUpdates
-    async def on_startup(app):
-        await app.bot.delete_webhook(drop_pending_updates=True)
-        print("✅ Webhook deleted, ready for polling")
+    # Синхронно удаляем все webhooks, чтобы не было конфликта getUpdates
+    import asyncio
+    asyncio.get_event_loop().run_until_complete(
+        app.bot.delete_webhook(drop_pending_updates=True)
+    )
+    print("✅ Webhook deleted, ready for polling")
 
     print("✅ Bot listo...")
-    # Запускаем polling с нашим on_startup
-    app.run_polling(on_startup=on_startup)
+    app.run_polling()
