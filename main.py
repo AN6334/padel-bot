@@ -79,11 +79,40 @@ def set_booking(day, slot, data):
     save_db()
 
 def cleanup_old_bookings():
-    today = datetime.now().date()
-    to_delete = [day for day in bookingsDB if datetime.strptime(day, "%d/%m/%Y").date() < today]
-    for d in to_delete:
+    now = datetime.now()
+    today = now.date()
+
+    # Remove days completely in the past
+    past_days = [
+        day
+        for day in bookingsDB
+        if datetime.strptime(day, "%d/%m/%Y").date() < today
+    ]
+    for d in past_days:
         del bookingsDB[d]
+
+    # Remove expired slots from today
+    today_str = now.strftime("%d/%m/%Y")
+    if today_str in bookingsDB:
+        slots = list(bookingsDB[today_str].keys())
+        for slot in slots:
+            try:
+                end_str = slot.split("–")[1]
+                end_time = datetime.strptime(end_str, "%H:%M").time()
+            except Exception:
+                continue
+            end_dt = datetime.combine(today, end_time)
+            if end_dt <= now:
+                del bookingsDB[today_str][slot]
+        if not bookingsDB[today_str]:
+            del bookingsDB[today_str]
+
     save_db()
+
+
+async def cleanup_job(context: ContextTypes.DEFAULT_TYPE):
+    """Periodic task to purge outdated reservations."""
+    cleanup_old_bookings()
 
 # ---- Хендлеры ----
 
@@ -113,6 +142,7 @@ async def reservar(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cancelar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     username = update.message.from_user.username or update.message.from_user.first_name
+    cleanup_old_bookings()
     user_bookings = []
     for day, slots in bookingsDB.items():
         for slot, info in slots.items():
@@ -261,6 +291,9 @@ if __name__ == '__main__':
     load_db()
     cleanup_old_bookings()
     app = ApplicationBuilder().token(BOT_TOKEN).build()
+
+    # Periodically remove outdated bookings
+    app.job_queue.run_repeating(cleanup_job, interval=3600, first=0)
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("reservar", reservar))
