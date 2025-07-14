@@ -109,6 +109,11 @@ def cleanup_old_bookings():
 
     save_db()
 
+
+async def cleanup_job(context: ContextTypes.DEFAULT_TYPE):
+    """Periodic task to purge outdated reservations."""
+    cleanup_old_bookings()
+
 # ---- Хендлеры ----
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -286,6 +291,9 @@ if __name__ == '__main__':
     load_db()
     cleanup_old_bookings()
     app = ApplicationBuilder().token(BOT_TOKEN).build()
+
+    # Periodically remove outdated bookings
+    app.job_queue.run_repeating(cleanup_job, interval=3600, first=0)
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("reservar", reservar))
