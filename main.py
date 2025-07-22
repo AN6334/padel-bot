@@ -79,15 +79,42 @@ def set_booking(day, slot, data):
     save_db()
 
 def cleanup_old_bookings():
-    today = datetime.now().date()
-    to_delete = [day for day in bookingsDB if datetime.strptime(day, "%d/%m/%Y").date() < today]
-    for d in to_delete:
+    """Remove bookings that are in the past."""
+    now = datetime.now()
+    today = now.date()
+    days_to_delete = []
+
+    for day, slots in list(bookingsDB.items()):
+        day_date = datetime.strptime(day, "%d/%m/%Y").date()
+
+        if day_date < today:
+            days_to_delete.append(day)
+            continue
+
+        if day_date == today:
+            slots_to_delete = []
+            for slot in list(slots.keys()):
+                start_str = slot.split("–")[0]
+                start_time = datetime.strptime(start_str, "%H:%M").time()
+                if datetime.combine(day_date, start_time) < now:
+                    slots_to_delete.append(slot)
+
+            for slot in slots_to_delete:
+                del slots[slot]
+
+            if not slots:
+                days_to_delete.append(day)
+
+    for d in days_to_delete:
         del bookingsDB[d]
-    save_db()
+
+    if days_to_delete or any(not v for v in bookingsDB.values()):
+        save_db()
 
 # ---- Хендлеры ----
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    cleanup_old_bookings()
     chat_id = update.effective_chat.id
     bookings[chat_id] = {}
     keyboard = [["🎾 Reservar pista", "❌ Cancelar reserva"]]
@@ -97,6 +124,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def reservar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    cleanup_old_bookings()
     chat_id = update.effective_chat.id
     bookings[chat_id] = {}
     labels = [
@@ -111,6 +139,7 @@ async def reservar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def cancelar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    cleanup_old_bookings()
     chat_id = update.effective_chat.id
     username = update.message.from_user.username or update.message.from_user.first_name
     user_bookings = []
@@ -150,6 +179,7 @@ async def welcome_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )
 
 async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    cleanup_old_bookings()
     chat_id = update.effective_chat.id
     text = update.message.text.strip()
     username = update.message.from_user.username or update.message.from_user.first_name
