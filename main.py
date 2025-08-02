@@ -104,7 +104,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     bookings[chat_id] = {}
     keyboard = [["🎾 Reservar pista", "❌ Cancelar reserva"]]
     await update.message.reply_text(
-        "🎾 ¡Reserva tu pista aquí!
+    "🎾 ¡Reserva tu pista aquí!\n\nPulsa /start para iniciar el proceso.\n\nTodas las reservas se publican aquí automáticamente 👇",
+    reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
+)
 
 Pulsa /start para iniciar el proceso.
 
