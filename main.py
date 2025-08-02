@@ -98,6 +98,15 @@ def cleanup_old_bookings():
         del bookingsDB[d]
     save_db()
 
+# ---- Главное меню ----
+
+async def send_main_menu(update, context):
+    keyboard = [["🎾 Reservar pista", "❌ Cancelar reserva"]]
+    await update.message.reply_text(
+        "Меню:",
+        reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
+    )
+
 # ---- Handlers ----
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -133,6 +142,7 @@ async def cancelar(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 user_bookings.append((day, slot))
     if not user_bookings:
         await update.message.reply_text("🔎 No tienes reservas activas.")
+        await send_main_menu(update, context)
         return
     context.user_data["cancel_options"] = user_bookings
     keyboard = [[f"{d} - {t}"] for d, t in user_bookings]
@@ -145,9 +155,11 @@ async def on_siesta_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Lo siento, este horario no está disponible debido a la siesta. Por favor, elige otro horario."
     )
+    await send_main_menu(update, context)
 
 async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Escribe /start para comenzar.")
+    await send_main_menu(update, context)
 
 async def welcome_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
     old_status = update.chat_member.old_chat_member.status
@@ -183,10 +195,11 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         chat_id=GROUP_CHAT_ID,
                         text=f"❌ Reserva cancelada:\n📅 {day}\n🕒 {slot}\n👤 Usuario: @{username}"
                     )
+                    await send_main_menu(update, context)
                 context.user_data["cancel_options"] = []
                 return
 
-    # --- Iniciar reserva por botón ---
+    # --- Iniciar reserva по кнопке ---
     if text.startswith("🎾"):
         labels = [
             f"Hoy ({get_date_string(0)})",
@@ -204,7 +217,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await cancelar(update, context)
         return
 
-    # --- Procesamiento de selección de día ---
+    # --- Обработка выбора дня ---
     tz = pytz.timezone("Europe/Madrid")
     now = datetime.now(tz)
 
@@ -214,9 +227,10 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
         day = get_date_string(1)
     else:
         await update.message.reply_text("⛔ Solo puedes reservar para hoy o mañana.")
+        await send_main_menu(update, context)
         return
 
-    # Chequear periodo permitido de reserva (desde las 00:00 del día anterior)
+    # Проверка разрешённого периода бронирования
     day_date = datetime.strptime(day, "%d/%m/%Y")
     day_date = tz.localize(day_date)
     allowed_from = day_date - timedelta(days=1)
@@ -227,6 +241,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "⏳ Solo puedes reservar una pista desde las 00:00 del día anterior (hora de Madrid). ¡Inténtalo más tarde!"
         )
+        await send_main_menu(update, context)
         return
 
     if not state.get("day") and any(text.startswith(p) for p in ["Hoy", "Mañana"]):
@@ -254,11 +269,12 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # --- Selección de hora ---
+    # --- Выбор времени ---
     if state.get("day") and not state.get("time"):
         clean_text = text.replace("🟩", "").replace("🟥", "").replace("🛏️", "").strip()
         if is_taken(state["day"], clean_text):
             await update.message.reply_text("⛔ Esta hora ya está reservada.")
+            await send_main_menu(update, context)
             return
         elif clean_text in generate_time_slots_for_day(state["day"]):
             bookings[chat_id]["time"] = clean_text
@@ -279,6 +295,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if is_taken(day, slot):
             await update.message.reply_text("⛔ Esta hora ya está reservada.")
             bookings.pop(chat_id, None)
+            await send_main_menu(update, context)
             return
         set_booking(day, slot, {"username": username, "piso": piso, "name": name})
         await update.message.reply_text(
@@ -290,9 +307,10 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text=f"📢 Nueva reserva\n📅 Día: {day}\n🕒 Hora: {slot}\n🏠 Piso: {piso}\n👤 Nombre: {name}"
         )
         bookings.pop(chat_id, None)
+        await send_main_menu(update, context)
         return
 
-# --- Lanzar aplicación ---
+# --- Запуск приложения ---
 
 if __name__ == '__main__':
     load_db()
