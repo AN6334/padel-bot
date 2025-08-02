@@ -103,7 +103,7 @@ def cleanup_old_bookings():
 async def send_main_menu(update, context):
     keyboard = [["🎾 Reservar pista", "❌ Cancelar reserva"]]
     await update.message.reply_text(
-        "Меню:",
+        "",
         reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
     )
 
@@ -230,12 +230,19 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await send_main_menu(update, context)
             return
 
-        # Проверка разрешённого периода бронирования
         day_date = datetime.strptime(day, "%d/%m/%Y")
         day_date = tz.localize(day_date)
-        allowed_from = day_date - timedelta(days=1)
-        allowed_from = allowed_from.replace(hour=0, minute=0, second=0, microsecond=0)
-        allowed_to = day_date.replace(hour=23, minute=59, second=59, microsecond=999999)
+        today = now.date()
+
+        if day_date.date() == today:
+            allowed_from = day_date.replace(hour=0, minute=0, second=0, microsecond=0)
+            allowed_to = day_date.replace(hour=23, minute=59, second=59, microsecond=999999)
+        elif day_date.date() == (today + timedelta(days=1)):
+            allowed_from = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            allowed_to = day_date.replace(hour=23, minute=59, second=59, microsecond=999999)
+        else:
+            await send_main_menu(update, context)
+            return
 
         if not (allowed_from <= now <= allowed_to):
             await update.message.reply_text(
