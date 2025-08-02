@@ -217,38 +217,33 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await cancelar(update, context)
         return
 
-    # --- Обработка выбора дня ---
     tz = pytz.timezone("Europe/Madrid")
     now = datetime.now(tz)
 
-    if text.startswith("Hoy"):
-        day = get_date_string(0)
-    elif text.startswith("Mañana"):
-        day = get_date_string(1)
-    else:
-        await update.message.reply_text("⛔ Solo puedes reservar para hoy o mañana.")
-        await send_main_menu(update, context)
-        return
-
-    # Проверка разрешённого периода бронирования
-    day_date = datetime.strptime(day, "%d/%m/%Y")
-    day_date = tz.localize(day_date)
-    allowed_from = day_date - timedelta(days=1)
-    allowed_from = allowed_from.replace(hour=0, minute=0, second=0, microsecond=0)
-    allowed_to = day_date.replace(hour=23, minute=59, second=59, microsecond=999999)
-
-    if not (allowed_from <= now <= allowed_to):
-        await update.message.reply_text(
-            "⏳ Solo puedes reservar una pista desde las 00:00 del día anterior (hora de Madrid). ¡Inténtalo más tarde!"
-        )
-        await send_main_menu(update, context)
-        return
-
-    if not state.get("day") and any(text.startswith(p) for p in ["Hoy", "Mañana"]):
+    # --- Обработка выбора дня ---
+    if not state.get("day"):
         if text.startswith("Hoy"):
             day = get_date_string(0)
         elif text.startswith("Mañana"):
             day = get_date_string(1)
+        else:
+            await send_main_menu(update, context)
+            return
+
+        # Проверка разрешённого периода бронирования
+        day_date = datetime.strptime(day, "%d/%m/%Y")
+        day_date = tz.localize(day_date)
+        allowed_from = day_date - timedelta(days=1)
+        allowed_from = allowed_from.replace(hour=0, minute=0, second=0, microsecond=0)
+        allowed_to = day_date.replace(hour=23, minute=59, second=59, microsecond=999999)
+
+        if not (allowed_from <= now <= allowed_to):
+            await update.message.reply_text(
+                "⏳ Solo puedes reservar una pista desde las 00:00 del día anterior (hora de Madrid). ¡Inténtalo más tarde!"
+            )
+            await send_main_menu(update, context)
+            return
+
         bookings[chat_id] = {"day": day}
 
         slots = generate_time_slots_for_day(day)
@@ -280,6 +275,9 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
             bookings[chat_id]["time"] = clean_text
             await update.message.reply_text("🏠 ¿Cuál es tu piso? (ej: 2B o 3A)")
             return
+        else:
+            await send_main_menu(update, context)
+            return
 
     if state.get("day") and state.get("time") and not state.get("floor"):
         piso = text
@@ -309,6 +307,10 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
         bookings.pop(chat_id, None)
         await send_main_menu(update, context)
         return
+
+    # --- Любой другой ввод сбрасывает пользователя в главное меню ---
+    await send_main_menu(update, context)
+    return
 
 # --- Запуск приложения ---
 
