@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import os
 import threading
 import json
@@ -104,13 +105,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     bookings[chat_id] = {}
     keyboard = [["🎾 Reservar pista", "❌ Cancelar reserva"]]
     await update.message.reply_text(
-    "🎾 ¡Reserva tu pista aquí!\n\nPulsa /start para iniciar el proceso.\n\nTodas las reservas se publican aquí automáticamente 👇",
-    reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
-)
-
-Pulsa /start para iniciar el proceso.
-
-Todas las reservas se publican aquí automáticamente 👇",
+        "🎾 ¡Reserva tu pista aquí!\n\nPulsa /start para iniciar el proceso.\n\nTodas las reservas se publican aquí automáticamente 👇",
         reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
     )
 
@@ -161,12 +156,8 @@ async def welcome_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await context.bot.send_message(
             chat_id=update.chat_member.chat.id,
             text=(
-                "🎾 ¡Reserva tu pista aquí!
-
-"
-                "Pulsa /start para iniciar el proceso.
-
-"
+                "🎾 ¡Reserva tu pista aquí!\n\n"
+                "Pulsa /start para iniciar el proceso.\n\n"
                 "Todas las reservas se publican aquí automáticamente 👇"
             )
         )
@@ -190,10 +181,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await update.message.reply_text("❌ Reserva cancelada.", reply_markup=ReplyKeyboardRemove())
                     await context.bot.send_message(
                         chat_id=GROUP_CHAT_ID,
-                        text=f"❌ Reserva cancelada:
-📅 {day}
-🕒 {slot}
-👤 Usuario: @{username}"
+                        text=f"❌ Reserva cancelada:\n📅 {day}\n🕒 {slot}\n👤 Usuario: @{username}"
                     )
                 context.user_data["cancel_options"] = []
                 return
@@ -294,21 +282,12 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         set_booking(day, slot, {"username": username, "piso": piso, "name": name})
         await update.message.reply_text(
-            f"✅ ¡Reservado!
-
-📅 Día: {day}
-🕒 Hora: {slot}
-🏠 Piso: {piso}
-👤 Nombre: {name}",
+            f"✅ ¡Reservado!\n\n📅 Día: {day}\n🕒 Hora: {slot}\n🏠 Piso: {piso}\n👤 Nombre: {name}",
             reply_markup=ReplyKeyboardRemove()
         )
         await context.bot.send_message(
             chat_id=GROUP_CHAT_ID,
-            text=f"📢 Nueva reserva
-📅 Día: {day}
-🕒 Hora: {slot}
-🏠 Piso: {piso}
-👤 Nombre: {name}"
+            text=f"📢 Nueva reserva\n📅 Día: {day}\n🕒 Hora: {slot}\n🏠 Piso: {piso}\n👤 Nombre: {name}"
         )
         bookings.pop(chat_id, None)
         return
