@@ -1,9 +1,9 @@
 [project]
-name = "python-template"
+name = "padel-bot"
 version = "0.1.0"
-description = ""
-authors = ["Your Name <you@example.com>"]
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 dependencies = [
-    "telegram>=0.0.1",
+    "python-telegram-bot>=20.0",
+    "pytz",
+    "redis>=5.0",
 ]
