@@ -395,8 +395,8 @@ if __name__ == '__main__':
     app.add_handler(
         MessageHandler(filters.TEXT & filters.Regex(r"^🛏️"), on_siesta_choice)
     )
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle))
-    app.add_handler(MessageHandler(filters.COMMAND, unknown))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, handle))
+    app.add_handler(MessageHandler(filters.COMMAND & filters.ChatType.PRIVATE, unknown))
     app.add_handler(ChatMemberHandler(welcome_new_member, ChatMemberHandler.CHAT_MEMBER))
 
     # polling (Render)
