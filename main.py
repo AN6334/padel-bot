@@ -392,14 +392,13 @@ telegram_app.add_handler(
 app = FastAPI()
 
 
-@app.get("/", response_class=PlainTextResponse)
+@app.api_route("/", methods=["GET", "HEAD"], response_class=PlainTextResponse)
 async def root():
     return "OK"
 
 
-@app.get("/health", response_class=PlainTextResponse)
+@app.api_route("/health", methods=["GET", "HEAD"], response_class=PlainTextResponse)
 async def health():
-    # простой health-check, не зависит от Redis
     return "OK"
 
 
