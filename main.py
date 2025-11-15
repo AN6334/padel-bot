@@ -451,6 +451,12 @@ async def root():
     return "OK"
 
 
+@app.head("/", response_class=PlainTextResponse)
+async def root_head():
+    # для любых HEAD / проверок
+    return PlainTextResponse("", status_code=200)
+
+
 @app.get("/health", response_class=PlainTextResponse)
 async def health():
     if r:
@@ -458,6 +464,24 @@ async def health():
             r.ping()
         except Exception as e:
             print(f"❌ Redis ping error en /health: {e}")
+            return PlainTextResponse("Redis error", status_code=500)
+    return "OK"
+
+
+@app.head("/health", response_class=PlainTextResponse)
+async def health_head():
+    # для HEAD-проверок (в т.ч. UptimeRobot)
+    return PlainTextResponse("", status_code=200)
+
+
+@app.post("/health", response_class=PlainTextResponse)
+async def health_post():
+    # на случай если какой-то монитор шлёт POST /health
+    if r:
+        try:
+            r.ping()
+        except Exception as e:
+            print(f"❌ Redis ping error en /health (POST): {e}")
             return PlainTextResponse("Redis error", status_code=500)
     return "OK"
 
