@@ -1,21 +1,21 @@
 # -*- coding: utf-8 -*-
 import os
 import json
+from datetime import datetime, time, timedelta
+
+import pytz
+import redis
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.responses import PlainTextResponse
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import (
     ApplicationBuilder,
     ContextTypes,
     CommandHandler,
     MessageHandler,
-    filters,
     ChatMemberHandler,
+    filters,
 )
-from datetime import datetime, time, timedelta
-import pytz
-import redis  # Upstash Redis
-
-from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import PlainTextResponse
 
 # ---- Configuración ----
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
@@ -24,6 +24,7 @@ REDIS_URL = os.environ.get("REDIS_URL")
 
 if not BOT_TOKEN or not GROUP_CHAT_ID:
     raise Exception("No están definidas las variables de entorno BOT_TOKEN o GROUP_CHAT_ID")
+
 GROUP_CHAT_ID = int(GROUP_CHAT_ID)
 
 # Conexión Redis (Upstash) con log claro
@@ -39,42 +40,41 @@ else:
         print(f"❌ Redis connection failed: {e}")
         r = None
 
-# Estado de conversación por chat
+# Estado de conversación por chat (en memoria)
 bookings = {}
 
 # ---- Slots y fechas ----
-
 def generate_time_slots_for_day(day_str: str) -> list[str]:
     day_date = datetime.strptime(day_str, "%d/%m/%Y").date()
     tz = pytz.timezone("Europe/Madrid")
     now = datetime.now(tz)
-    open_dt  = datetime.combine(day_date, time(10, 0))
+
+    open_dt = datetime.combine(day_date, time(10, 0))
     close_dt = datetime.combine(day_date, time(22, 0))
-    delta = timedelta(minutes=30)
+    delta = timedelta(hours=1, minutes=30)
 
     slots = []
-    current = open_dt
-    while current < close_dt:
-        slot_label = current.strftime("%H:%M") + " - " + (current + delta).strftime("%H:%M")
-        slot_end = current + delta
-        if day_date == now.date():
-            if slot_end <= now:
-                current += delta
-                continue
-        slots.append(slot_label)
-        current += delta
+    cur = open_dt
+    while cur + delta <= close_dt:
+        end = cur + delta
+        # Логика из исходного кода: скрывать уже прошедшие слоты "сегодня"
+        if day_date == now.date() and cur < now.replace(tzinfo=None):
+            cur = end
+            continue
+        slots.append(f"{cur.strftime('%H:%M')}–{end.strftime('%H:%M')}")
+        cur = end
     return slots
 
-def get_date_string(offset_days: int) -> str:
+
+def get_date_string(offset: int) -> str:
     tz = pytz.timezone("Europe/Madrid")
-    now = datetime.now(tz).date()
-    target = now + timedelta(days=offset_days)
-    return target.strftime("%d/%m/%Y")
+    return (datetime.now(tz) + timedelta(days=offset)).strftime("%d/%m/%Y")
 
-# ---- Almacenamiento de reservas ----
 
+# ---- Almacenamiento (Redis con fallback archivo) ----
 DB_FILE = "bookings.json"
 bookingsDB = {}
+
 
 def load_db_file():
     global bookingsDB
@@ -87,19 +87,23 @@ def load_db_file():
     else:
         bookingsDB = {}
 
+
 def save_db_file():
     with open(DB_FILE, "w", encoding="utf-8") as f:
         json.dump(bookingsDB, f, ensure_ascii=False)
 
+
 def booking_key(day: str, slot: str) -> str:
     return f"booking:{day}:{slot}"
 
-def is_taken(day: str, slot: str) -> bool:
-    if r:
-        return r.exists(booking_key(day, slot)) == 1
-    return slot in bookingsDB.get(day, {})
 
-def set_booking(day, slot, data) -> bool:
+def is_taken(day: str, time_slot: str) -> bool:
+    if r:
+        return r.exists(booking_key(day, time_slot)) == 1
+    return time_slot in bookingsDB.get(day, {})
+
+
+def set_booking(day: str, slot: str, data: dict) -> bool:
     if r:
         ok = r.set(booking_key(day, slot), json.dumps(data, ensure_ascii=False), nx=True)
         return bool(ok)
@@ -112,7 +116,8 @@ def set_booking(day, slot, data) -> bool:
     save_db_file()
     return True
 
-def delete_booking(day, slot):
+
+def delete_booking(day: str, slot: str):
     if r:
         r.delete(booking_key(day, slot))
         return
@@ -122,7 +127,8 @@ def delete_booking(day, slot):
             del bookingsDB[day]
         save_db_file()
 
-def list_user_bookings(username):
+
+def list_user_bookings(username: str):
     result = []
     if r:
         for key in r.scan_iter("booking:*"):
@@ -140,76 +146,45 @@ def list_user_bookings(username):
                 result.append((day, slot))
     return result
 
+
 def cleanup_old_bookings():
     tz = pytz.timezone("Europe/Madrid")
-    now = datetime.now(tz)
+    today = datetime.now(tz).date()
 
     if r:
-        keys_to_delete = []
         for key in r.scan_iter("booking:*"):
-            raw = r.get(key)
-            if not raw:
-                keys_to_delete.append(key)
-                continue
-            info = json.loads(raw)
-            day = info.get("day")
-            slot = info.get("slot")
-            if not day or not slot:
-                keys_to_delete.append(key)
-                continue
             try:
-                day_date = datetime.strptime(day, "%d/%m/%Y")
-            except ValueError:
-                keys_to_delete.append(key)
-                continue
-            slot_start_str = slot.split(" - ")[0]
-            try:
-                slot_time = datetime.strptime(slot_start_str, "%H:%M").time()
-            except ValueError:
-                keys_to_delete.append(key)
-                continue
-            dt = pytz.timezone("Europe/Madrid").localize(datetime.combine(day_date, slot_time))
-            if dt < now - timedelta(hours=12):
-                keys_to_delete.append(key)
-        for k in keys_to_delete:
-            r.delete(k)
-        return
+                _, day, slot = key.split(":", 2)
+                if datetime.strptime(day, "%d/%m/%Y").date() < today:
+                    r.delete(key)
+            except Exception:
+                pass
+    else:
+        to_delete = [d for d in bookingsDB if datetime.strptime(d, "%d/%m/%Y").date() < today]
+        for d in to_delete:
+            del bookingsDB[d]
+        save_db_file()
 
-    global bookingsDB
-    new_db = {}
-    for day, slots in bookingsDB.items():
-        day_date = datetime.strptime(day, "%d/%m/%Y")
-        for slot, info in slots.items():
-            slot_start_str = slot.split(" - ")[0]
-            slot_time = datetime.strptime(slot_start_str, "%H:%M").time()
-            dt = datetime.combine(day_date, slot_time)
-            dt = pytz.timezone("Europe/Madrid").localize(dt)
-            if dt >= now - timedelta(hours=12):
-                if day not in new_db:
-                    new_db[day] = {}
-                new_db[day][slot] = info
-    bookingsDB = new_db
-    save_db_file()
 
 # ---- Menú principal ----
-
-async def send_main_menu(update, context):
+async def send_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [["🎾 Reservar pista", "❌ Cancelar reserva"]]
     await update.message.reply_text(
         "Elige una opción 👇",
-        reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
+        reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True),
     )
 
-# ---- Handlers ----
 
+# ---- Handlers ----
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     bookings[chat_id] = {}
     keyboard = [["🎾 Reservar pista", "❌ Cancelar reserva"]]
     await update.message.reply_text(
         "🎾 ¡Reserva tu pista aquí!\n\nPulsa /start para iniciar el proceso.\n\nTodas las reservas se publican aquí automáticamente 👇",
-        reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
+        reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True),
     )
+
 
 async def reservar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
@@ -218,40 +193,40 @@ async def reservar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [labels]
     await update.message.reply_text(
         "📅 ¿Para qué día quieres reservar?",
-        reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
+        reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True),
     )
+
 
 async def cancelar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cleanup_old_bookings()
     chat_id = update.effective_chat.id
     username = update.message.from_user.username or update.message.from_user.first_name
     user_bookings = list_user_bookings(username)
+
     if not user_bookings:
         await update.message.reply_text("🔎 No tienes reservas activas.")
         await send_main_menu(update, context)
         return
+
     context.user_data["cancel_options"] = user_bookings
     keyboard = [[f"{d} - {t}"] for d, t in user_bookings]
     await update.message.reply_text(
         "❓ ¿Qué reserva quieres cancelar?",
-        reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
+        reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True),
     )
 
-async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    tz = pytz.timezone("Europe/Madrid")
-    now = datetime.now(tz)
-    msg = f"Bot activo. Hora del servidor (Madrid): {now.strftime('%Y-%m-%d %H:%M:%S')}"
-    await update.message.reply_text(msg)
 
 async def on_siesta_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Lo siento, este horario no está disponible debido a la siesta. Por favor, elige otro horario."
+        "Lo siento, no es posible reservar este horario debido a la siesta. Por favor, elige otro."
     )
     await send_main_menu(update, context)
+
 
 async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Escribe /start para comenzar.")
     await send_main_menu(update, context)
+
 
 async def welcome_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
     old_status = update.chat_member.old_chat_member.status
@@ -259,10 +234,26 @@ async def welcome_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if old_status in ("left", "kicked") and new_status in ("member", "administrator"):
         await context.bot.send_message(
             chat_id=update.chat_member.chat.id,
-            text=("🎾 ¡Reserva tu pista aquí!\n\n"
-                  "Pulsa /start para iniciar el proceso.\n\n"
-                  "Todas las reservas se publican aquí automáticamente 👇")
+            text=(
+                "🎾 ¡Reserva tu pista aquí!\n\n"
+                "Pulsa /start para iniciar el proceso.\n\n"
+                "Todas las reservas se publican aquí automáticamente 👇"
+            ),
         )
+
+
+async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    src = "Redis" if r else "archivo"
+    tz = pytz.timezone("Europe/Madrid")
+    today = datetime.now(tz).strftime("%d/%m/%Y")
+    count = 0
+    if r:
+        for _ in r.scan_iter(f"booking:{today}:*"):
+            count += 1
+    else:
+        count = len(bookingsDB.get(today, {}))
+    await update.message.reply_text(f"Fuente: {src}\nHoy ({today}) reservas: {count}")
+
 
 async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
@@ -279,7 +270,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text("❌ Reserva cancelada.", reply_markup=ReplyKeyboardRemove())
                 await context.bot.send_message(
                     chat_id=GROUP_CHAT_ID,
-                    text=f"❌ Reserva cancelada:\n📅 {day}\n🕒 {slot}\n👤 Usuario: @{username}"
+                    text=f"❌ Reserva cancelada:\n📅 {day}\n🕒 {slot}\n👤 Usuario: @{username}",
                 )
                 await send_main_menu(update, context)
                 context.user_data["cancel_options"] = []
@@ -291,15 +282,20 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [labels]
         await update.message.reply_text(
             "📅 ¿Para qué día quieres reservar?",
-            reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
+            reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True),
         )
         bookings[chat_id] = {}
         return
 
-    # --- Elección de día ---
+    if text.startswith("❌"):
+        await cancelar(update, context)
+        return
+
+    tz = pytz.timezone("Europe/Madrid")
+    now = datetime.now(tz)
+
+    # --- Elección del día ---
     if not state.get("day"):
-        tz = pytz.timezone("Europe/Madrid")
-        now = datetime.now(tz)
         if text.startswith("Hoy"):
             day = get_date_string(0)
         elif text.startswith("Mañana"):
@@ -329,14 +325,13 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         bookings[chat_id] = {"day": day}
-        day_str = bookings[chat_id]["day"]
-        slots = generate_time_slots_for_day(day_str)
 
+        slots = generate_time_slots_for_day(day)
         keyboard = []
         for slot in slots:
-            start_str = slot.split(" - ")[0]
-            st = datetime.strptime(start_str, "%H:%M").time()
-            if is_taken(day_str, slot):
+            start_h, start_m = map(int, slot.split("–")[0].split(":"))
+            st = time(start_h, start_m)
+            if is_taken(day, slot):
                 keyboard.append([f"🟥 {slot}"])
             elif time(14, 30) <= st < time(17, 30):
                 keyboard.append([f"🛏️ {slot}"])
@@ -345,69 +340,71 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await update.message.reply_text(
             "🕒 Elige una hora:",
-            reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
+            reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True),
         )
         return
 
     # --- Elección de hora ---
     if state.get("day") and not state.get("time"):
-        clean_text = text.replace("🟩", "").replace("🟥", "").replace("🛏️", "").strip()
-        if is_taken(state["day"], clean_text):
-            await update.message.reply_text("⛔ Esta hora ya está reservada.")
+        clean_text = (
+            text.replace("🟩", "")
+            .replace("🟥", "")
+            .replace("🛏️", "")
+            .strip()
+        )
+
+        # Жёсткий запрет на бронирование в сиесту
+        try:
+            start_str = clean_text.split("–")[0]
+            start_h, start_m = map(int, start_str.split(":"))
+            st = time(start_h, start_m)
+        except Exception:
             await send_main_menu(update, context)
-            bookings.pop(chat_id, None)
             return
 
-        start_str = clean_text.split(" - ")[0]
-        st = datetime.strptime(start_str, "%H:%M").time()
         if time(14, 30) <= st < time(17, 30):
-            # Siesta: no se permite reservar
             await on_siesta_choice(update, context)
             bookings.pop(chat_id, None)
             return
 
-        bookings[chat_id]["time"] = clean_text
-        await update.message.reply_text(
-            "🏠 Indica tu piso (por ejemplo: 2B):",
-            reply_markup=ReplyKeyboardRemove()
-        )
-        return
-
-    # --- Piso ---
-    if state.get("day") and state.get("time") and not state.get("piso"):
-        bookings[chat_id]["piso"] = text
-        await update.message.reply_text("👤 Escribe tu nombre para la reserva:")
-        return
-
-    # --- Nombre y confirmación ---
-    if state.get("day") and state.get("time") and state.get("piso") and not state.get("name"):
-        bookings[chat_id]["name"] = text
-        day = bookings[chat_id]["day"]
-        slot = bookings[chat_id]["time"]
-        piso = bookings[chat_id]["piso"]
-        name = bookings[chat_id]["name"]
-
-        data = {
-            "username": username,
-            "day": day,
-            "slot": slot,
-            "piso": piso,
-            "name": name,
-        }
-
-        if not set_booking(day, slot, data):
-            await update.message.reply_text("⛔ Esta hora ya fue reservada justo ahora por otra persona.")
+        if is_taken(state["day"], clean_text):
+            await update.message.reply_text("⛔ Esta hora ya está reservada.")
             await send_main_menu(update, context)
+            return
+        elif clean_text in generate_time_slots_for_day(state["day"]):
+            bookings[chat_id]["time"] = clean_text
+            await update.message.reply_text("🏠 ¿Cuál es tu piso? (ej: 2B o 3A)")
+            return
+        else:
+            await send_main_menu(update, context)
+            return
+
+    # --- Piso / Nombre ---
+    if state.get("day") and state.get("time") and not state.get("floor"):
+        bookings[chat_id]["floor"] = text
+        await update.message.reply_text("👤 ¿Cuál es tu nombre?")
+        return
+
+    if state.get("day") and state.get("time") and state.get("floor") and not state.get("name"):
+        name = text
+        day = state["day"]
+        slot = state["time"]
+        piso = state["floor"]
+
+        ok = set_booking(day, slot, {"username": username, "piso": piso, "name": name})
+        if not ok:
+            await update.message.reply_text("⛔ Esta hora ya está reservada.")
             bookings.pop(chat_id, None)
+            await send_main_menu(update, context)
             return
 
         await update.message.reply_text(
-            f"✅ Reserva confirmada:\n📅 {day}\n🕒 {slot}\n🏠 Piso: {piso}\n👤 Nombre: {name}",
-            reply_markup=ReplyKeyboardRemove()
+            f"✅ ¡Reservado!\n\n📅 Día: {day}\n🕒 Hora: {slot}\n🏠 Piso: {piso}\n👤 Nombre: {name}",
+            reply_markup=ReplyKeyboardRemove(),
         )
         await context.bot.send_message(
             chat_id=GROUP_CHAT_ID,
-            text=f"📢 Nueva reserva\n📅 Día: {day}\n🕒 Hora: {slot}\n🏠 Piso: {piso}\n👤 Nombre: {name}"
+            text=f"📢 Nueva reserva\n📅 Día: {day}\n🕒 Hora: {slot}\n🏠 Piso: {piso}\n👤 Nombre: {name}",
         )
         bookings.pop(chat_id, None)
         await send_main_menu(update, context)
@@ -417,9 +414,8 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_main_menu(update, context)
     return
 
-# ---- Arranque con webhook (FastAPI + Render) ----
 
-# Configuración de webhook
+# ---- Configuración de webhook (Render + FastAPI) ----
 BASE_URL = os.environ.get("BASE_URL")  # p.ej. "https://padel-bot-v77e.onrender.com"
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "padel_webhook_secret")
 
@@ -429,7 +425,6 @@ if not BASE_URL:
 WEBHOOK_PATH = f"/webhook/{WEBHOOK_SECRET}"
 WEBHOOK_URL = BASE_URL.rstrip("/") + WEBHOOK_PATH
 
-# Aplicación de Telegram
 telegram_app = ApplicationBuilder().token(BOT_TOKEN).build()
 telegram_app.add_handler(CommandHandler("start", start))
 telegram_app.add_handler(CommandHandler("reservar", reservar))
@@ -439,30 +434,22 @@ telegram_app.add_handler(
     MessageHandler(filters.TEXT & filters.Regex(r"^🛏️"), on_siesta_choice)
 )
 telegram_app.add_handler(
-    MessageHandler(
-        filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE,
-        handle,
-    )
+    MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, handle)
 )
 telegram_app.add_handler(
-    MessageHandler(
-        filters.COMMAND & filters.ChatType.PRIVATE,
-        unknown,
-    )
+    MessageHandler(filters.COMMAND & filters.ChatType.PRIVATE, unknown)
 )
 telegram_app.add_handler(
-    ChatMemberHandler(
-        welcome_new_member,
-        ChatMemberHandler.CHAT_MEMBER,
-    )
+    ChatMemberHandler(welcome_new_member, ChatMemberHandler.CHAT_MEMBER)
 )
 
-# FastAPI app para Render
 app = FastAPI()
+
 
 @app.get("/", response_class=PlainTextResponse)
 async def root():
     return "OK"
+
 
 @app.get("/health", response_class=PlainTextResponse)
 async def health():
@@ -473,6 +460,7 @@ async def health():
             print(f"❌ Redis ping error en /health: {e}")
             return PlainTextResponse("Redis error", status_code=500)
     return "OK"
+
 
 @app.post(WEBHOOK_PATH)
 async def telegram_webhook(request: Request):
@@ -485,13 +473,14 @@ async def telegram_webhook(request: Request):
     await telegram_app.process_update(update)
     return PlainTextResponse("OK")
 
+
 @app.on_event("startup")
 async def on_startup():
     if not r:
-        load_db_file()  # fallback sólo si no hay Redis
+        load_db_file()
     cleanup_old_bookings()
-    print("✅ Iniciando bot con webhook...")
 
+    print("✅ Iniciando bot con webhook...")
     await telegram_app.initialize()
     await telegram_app.start()
     await telegram_app.bot.set_webhook(
@@ -499,6 +488,7 @@ async def on_startup():
         drop_pending_updates=True,
     )
     print(f"✅ Webhook configurado en {WEBHOOK_URL}")
+
 
 @app.on_event("shutdown")
 async def on_shutdown():
