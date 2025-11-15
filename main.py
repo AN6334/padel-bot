@@ -21,30 +21,31 @@ from telegram.ext import (
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 GROUP_CHAT_ID = os.environ.get("GROUP_CHAT_ID")
 REDIS_URL = os.environ.get("REDIS_URL")
+BASE_URL = os.environ.get("BASE_URL")  # p.ej. "https://padel-bot-v77e.onrender.com"
+WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "padel_webhook_secret")
 
 if not BOT_TOKEN or not GROUP_CHAT_ID:
     raise Exception("No están definidas las variables de entorno BOT_TOKEN o GROUP_CHAT_ID")
 
+if not BASE_URL:
+    raise Exception("No está definida la variable de entorno BASE_URL")
+
 GROUP_CHAT_ID = int(GROUP_CHAT_ID)
 
-# Conexión Redis (Upstash) con log claro
-r = None
+# ---- Conexión Redis (Upstash) ----
 if not REDIS_URL:
-    print("⚠️ REDIS_URL no está configurado. Usando almacenamiento en archivo (no persistente).")
-else:
-    try:
-        r = redis.from_url(REDIS_URL, decode_responses=True)
-        r.ping()
-        print("✅ Connected to Redis")
-    except Exception as e:
-        print(f"❌ Redis connection failed: {e}")
-        r = None
+    raise Exception("No está definida la variable de entorno REDIS_URL")
 
-# Estado de conversación por chat (en memoria)
-bookings = {}
+try:
+    r = redis.from_url(REDIS_URL, decode_responses=True)
+    r.ping()
+    print("✅ Connected to Redis")
+except Exception as e:
+    raise Exception(f"❌ Redis connection failed: {e}")
 
 # ---- Slots y fechas ----
 def generate_time_slots_for_day(day_str: str) -> list[str]:
+    """Genera slots de 1h30 entre 10:00 y 22:00, ocultando ya pasados para hoy."""
     day_date = datetime.strptime(day_str, "%d/%m/%Y").date()
     tz = pytz.timezone("Europe/Madrid")
     now = datetime.now(tz)
@@ -57,7 +58,7 @@ def generate_time_slots_for_day(day_str: str) -> list[str]:
     cur = open_dt
     while cur + delta <= close_dt:
         end = cur + delta
-        # Логика из исходного кода: скрывать уже прошедшие слоты "сегодня"
+        # скрывать прошедшие слоты только для сегодня
         if day_date == now.date() and cur < now.replace(tzinfo=None):
             cur = end
             continue
@@ -71,99 +72,52 @@ def get_date_string(offset: int) -> str:
     return (datetime.now(tz) + timedelta(days=offset)).strftime("%d/%m/%Y")
 
 
-# ---- Almacenamiento (Redis con fallback archivo) ----
-DB_FILE = "bookings.json"
-bookingsDB = {}
-
-
-def load_db_file():
-    global bookingsDB
-    if os.path.exists(DB_FILE):
-        try:
-            with open(DB_FILE, "r", encoding="utf-8") as f:
-                bookingsDB = json.load(f)
-        except Exception:
-            bookingsDB = {}
-    else:
-        bookingsDB = {}
-
-
-def save_db_file():
-    with open(DB_FILE, "w", encoding="utf-8") as f:
-        json.dump(bookingsDB, f, ensure_ascii=False)
-
-
+# ---- Almacenamiento en Redis ----
 def booking_key(day: str, slot: str) -> str:
     return f"booking:{day}:{slot}"
 
 
 def is_taken(day: str, time_slot: str) -> bool:
-    if r:
-        return r.exists(booking_key(day, time_slot)) == 1
-    return time_slot in bookingsDB.get(day, {})
+    return r.exists(booking_key(day, time_slot)) == 1
 
 
 def set_booking(day: str, slot: str, data: dict) -> bool:
-    if r:
-        ok = r.set(booking_key(day, slot), json.dumps(data, ensure_ascii=False), nx=True)
-        return bool(ok)
-
-    if day not in bookingsDB:
-        bookingsDB[day] = {}
-    if slot in bookingsDB[day]:
-        return False
-    bookingsDB[day][slot] = data
-    save_db_file()
-    return True
+    """Intenta crear reserva; True si creada, False si ya existe."""
+    ok = r.set(booking_key(day, slot), json.dumps(data, ensure_ascii=False), nx=True)
+    return bool(ok)
 
 
 def delete_booking(day: str, slot: str):
-    if r:
-        r.delete(booking_key(day, slot))
-        return
-    if day in bookingsDB and slot in bookingsDB[day]:
-        del bookingsDB[day][slot]
-        if not bookingsDB[day]:
-            del bookingsDB[day]
-        save_db_file()
+    r.delete(booking_key(day, slot))
 
 
 def list_user_bookings(username: str):
+    """Возвращает список (day, slot) для пользователя."""
     result = []
-    if r:
-        for key in r.scan_iter("booking:*"):
-            raw = r.get(key)
-            if not raw:
-                continue
-            info = json.loads(raw)
-            if info.get("username") == username:
-                _, day, slot = key.split(":", 2)
-                result.append((day, slot))
-        return result
-    for day, slots in bookingsDB.items():
-        for slot, info in slots.items():
-            if info.get("username") == username:
-                result.append((day, slot))
+    for key in r.scan_iter("booking:*"):
+        raw = r.get(key)
+        if not raw:
+            continue
+        info = json.loads(raw)
+        if info.get("username") == username:
+            _, day, slot = key.split(":", 2)
+            result.append((day, slot))
     return result
 
 
 def cleanup_old_bookings():
+    """Удаляет брони прошлых дней."""
     tz = pytz.timezone("Europe/Madrid")
     today = datetime.now(tz).date()
 
-    if r:
-        for key in r.scan_iter("booking:*"):
-            try:
-                _, day, slot = key.split(":", 2)
-                if datetime.strptime(day, "%d/%m/%Y").date() < today:
-                    r.delete(key)
-            except Exception:
-                pass
-    else:
-        to_delete = [d for d in bookingsDB if datetime.strptime(d, "%d/%m/%Y").date() < today]
-        for d in to_delete:
-            del bookingsDB[d]
-        save_db_file()
+    for key in r.scan_iter("booking:*"):
+        try:
+            _, day, slot = key.split(":", 2)
+            if datetime.strptime(day, "%d/%m/%Y").date() < today:
+                r.delete(key)
+        except Exception:
+            # не ломаемся из-за кривого ключа
+            pass
 
 
 # ---- Menú principal ----
@@ -177,18 +131,17 @@ async def send_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ---- Handlers ----
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    bookings[chat_id] = {}
+    context.user_data.clear()
     keyboard = [["🎾 Reservar pista", "❌ Cancelar reserva"]]
     await update.message.reply_text(
-        "🎾 ¡Reserva tu pista aquí!\n\nPulsa /start para iniciar el proceso.\n\nTodas las reservas se publican aquí automáticamente 👇",
+        "🎾 ¡Reserva tu pista aquí!\n\nPulsa /start para iniciar el proceso.\n\n"
+        "Todas las reservas se publican aquí automáticamente 👇",
         reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True),
     )
 
 
 async def reservar(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    bookings[chat_id] = {}
+    context.user_data.clear()
     labels = [f"Hoy ({get_date_string(0)})", f"Mañana ({get_date_string(1)})"]
     keyboard = [labels]
     await update.message.reply_text(
@@ -199,7 +152,6 @@ async def reservar(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cancelar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cleanup_old_bookings()
-    chat_id = update.effective_chat.id
     username = update.message.from_user.username or update.message.from_user.first_name
     user_bookings = list_user_bookings(username)
 
@@ -208,6 +160,7 @@ async def cancelar(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send_main_menu(update, context)
         return
 
+    context.user_data.clear()
     context.user_data["cancel_options"] = user_bookings
     keyboard = [[f"{d} - {t}"] for d, t in user_bookings]
     await update.message.reply_text(
@@ -243,27 +196,22 @@ async def welcome_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    src = "Redis" if r else "archivo"
     tz = pytz.timezone("Europe/Madrid")
     today = datetime.now(tz).strftime("%d/%m/%Y")
     count = 0
-    if r:
-        for _ in r.scan_iter(f"booking:{today}:*"):
-            count += 1
-    else:
-        count = len(bookingsDB.get(today, {}))
-    await update.message.reply_text(f"Fuente: {src}\nHoy ({today}) reservas: {count}")
+    for _ in r.scan_iter(f"booking:{today}:*"):
+        count += 1
+    await update.message.reply_text(f"Fuente: Redis\nHoy ({today}) reservas: {count}")
 
 
 async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    text = update.message.text.strip()
+    text = (update.message.text or "").strip()
     username = update.message.from_user.username or update.message.from_user.first_name
-    state = bookings.get(chat_id, {})
+    state = context.user_data
 
     # --- Cancelación ---
-    if "cancel_options" in context.user_data:
-        options = context.user_data.get("cancel_options", [])
+    if "cancel_options" in state and state.get("cancel_options"):
+        options = state.get("cancel_options", [])
         for day, slot in options:
             if text == f"{day} - {slot}":
                 delete_booking(day, slot)
@@ -272,21 +220,22 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     chat_id=GROUP_CHAT_ID,
                     text=f"❌ Reserva cancelada:\n📅 {day}\n🕒 {slot}\n👤 Usuario: @{username}",
                 )
+                state.clear()
                 await send_main_menu(update, context)
-                context.user_data["cancel_options"] = []
                 return
 
-    # --- Iniciar reserva ---
+    # --- Iniciar reserva через кнопку ---
     if text.startswith("🎾"):
+        state.clear()
         labels = [f"Hoy ({get_date_string(0)})", f"Mañana ({get_date_string(1)})"]
         keyboard = [labels]
         await update.message.reply_text(
             "📅 ¿Para qué día quieres reservar?",
             reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True),
         )
-        bookings[chat_id] = {}
         return
 
+    # --- Перейти в режим отмены через кнопку ---
     if text.startswith("❌"):
         await cancelar(update, context)
         return
@@ -319,12 +268,13 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if not (allowed_from <= now <= allowed_to):
             await update.message.reply_text(
-                "⏳ Solo puedes reservar una pista desde las 00:00 del día anterior (hora de Madrid). ¡Inténtalo más tarde!"
+                "⏳ Solo puedes reservar una pista desde las 00:00 del día anterior "
+                "(hora de Madrid). ¡Inténtalo más tarde!"
             )
             await send_main_menu(update, context)
             return
 
-        bookings[chat_id] = {"day": day}
+        state["day"] = day
 
         slots = generate_time_slots_for_day(day)
         keyboard = []
@@ -353,7 +303,6 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
             .strip()
         )
 
-        # Жёсткий запрет на бронирование в сиесту
         try:
             start_str = clean_text.split("–")[0]
             start_h, start_m = map(int, start_str.split(":"))
@@ -362,29 +311,32 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await send_main_menu(update, context)
             return
 
+        # Жёсткий запрет на сиесту
         if time(14, 30) <= st < time(17, 30):
             await on_siesta_choice(update, context)
-            bookings.pop(chat_id, None)
+            state.clear()
             return
 
         if is_taken(state["day"], clean_text):
             await update.message.reply_text("⛔ Esta hora ya está reservada.")
+            state.clear()
             await send_main_menu(update, context)
             return
         elif clean_text in generate_time_slots_for_day(state["day"]):
-            bookings[chat_id]["time"] = clean_text
+            state["time"] = clean_text
             await update.message.reply_text("🏠 ¿Cuál es tu piso? (ej: 2B o 3A)")
             return
         else:
             await send_main_menu(update, context)
             return
 
-    # --- Piso / Nombre ---
+    # --- Piso ---
     if state.get("day") and state.get("time") and not state.get("floor"):
-        bookings[chat_id]["floor"] = text
+        state["floor"] = text
         await update.message.reply_text("👤 ¿Cuál es tu nombre?")
         return
 
+    # --- Nombre + creación de reserva ---
     if state.get("day") and state.get("time") and state.get("floor") and not state.get("name"):
         name = text
         day = state["day"]
@@ -394,7 +346,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ok = set_booking(day, slot, {"username": username, "piso": piso, "name": name})
         if not ok:
             await update.message.reply_text("⛔ Esta hora ya está reservada.")
-            bookings.pop(chat_id, None)
+            state.clear()
             await send_main_menu(update, context)
             return
 
@@ -406,22 +358,16 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
             chat_id=GROUP_CHAT_ID,
             text=f"📢 Nueva reserva\n📅 Día: {day}\n🕒 Hora: {slot}\n🏠 Piso: {piso}\n👤 Nombre: {name}",
         )
-        bookings.pop(chat_id, None)
+        state.clear()
         await send_main_menu(update, context)
         return
 
-    # cualquier otra cosa → menú
+    # Cualquier otra cosa → menú
     await send_main_menu(update, context)
     return
 
 
 # ---- Configuración de webhook (Render + FastAPI) ----
-BASE_URL = os.environ.get("BASE_URL")  # p.ej. "https://padel-bot-v77e.onrender.com"
-WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "padel_webhook_secret")
-
-if not BASE_URL:
-    raise Exception("No está definida la variable de entorno BASE_URL")
-
 WEBHOOK_PATH = f"/webhook/{WEBHOOK_SECRET}"
 WEBHOOK_URL = BASE_URL.rstrip("/") + WEBHOOK_PATH
 
@@ -451,38 +397,9 @@ async def root():
     return "OK"
 
 
-@app.head("/", response_class=PlainTextResponse)
-async def root_head():
-    # для любых HEAD / проверок
-    return PlainTextResponse("", status_code=200)
-
-
 @app.get("/health", response_class=PlainTextResponse)
 async def health():
-    if r:
-        try:
-            r.ping()
-        except Exception as e:
-            print(f"❌ Redis ping error en /health: {e}")
-            return PlainTextResponse("Redis error", status_code=500)
-    return "OK"
-
-
-@app.head("/health", response_class=PlainTextResponse)
-async def health_head():
-    # для HEAD-проверок (в т.ч. UptimeRobot)
-    return PlainTextResponse("", status_code=200)
-
-
-@app.post("/health", response_class=PlainTextResponse)
-async def health_post():
-    # на случай если какой-то монитор шлёт POST /health
-    if r:
-        try:
-            r.ping()
-        except Exception as e:
-            print(f"❌ Redis ping error en /health (POST): {e}")
-            return PlainTextResponse("Redis error", status_code=500)
+    # простой health-check, не зависит от Redis
     return "OK"
 
 
@@ -500,8 +417,6 @@ async def telegram_webhook(request: Request):
 
 @app.on_event("startup")
 async def on_startup():
-    if not r:
-        load_db_file()
     cleanup_old_bookings()
 
     print("✅ Iniciando bot con webhook...")
@@ -509,7 +424,7 @@ async def on_startup():
     await telegram_app.start()
     await telegram_app.bot.set_webhook(
         url=WEBHOOK_URL,
-        drop_pending_updates=True,
+        drop_pending_updates=False,  # не теряем накопленные апдейты
     )
     print(f"✅ Webhook configurado en {WEBHOOK_URL}")
 
