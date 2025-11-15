@@ -1,3 +1,5 @@
 python-telegram-bot>=20.0
 pytz
 redis>=5.0
+fastapi
+uvicorn[standard]
