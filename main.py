@@ -504,37 +504,24 @@ if __name__ == "__main__":
     # puerto que da Render
     port = int(os.environ.get("PORT", "8000"))
 
-    # путь и полный URL вебхука
+    # URL completo del webhook
     webhook_path = f"/webhook/{BOT_TOKEN}"
     webhook_url = BASE_URL.rstrip("/") + webhook_path
-
-    print(f"🌍 Starting webhook on 0.0.0.0:{port}")
-    print(f"🔗 Webhook URL: {webhook_url}")
-
-    # run_webhook сам поставит webhook в Telegram
-    from telegram.ext import Application
-
-if __name__ == "__main__":
-    if not r:
-        load_db_file()
-    cleanup_old_bookings()
-
-    application = build_application()
-
-    # --- Устанавливаем webhook вручную ---
-    async def set_webhook():
-        await application.bot.delete_webhook(drop_pending_updates=True)
-        await application.bot.set_webhook(url=webhook_url)
-
-    import asyncio
-    asyncio.get_event_loop().run_until_complete(set_webhook())
 
     print(f"🌍 Starting webhook listener on 0.0.0.0:{port}")
     print(f"🔗 Webhook URL: {webhook_url}")
 
-    # --- Запускаем встроенный webserver ---
+    # Primero очищаем старый webhook и ставим новый
+    import asyncio
+
+    async def setup_webhook():
+        await application.bot.delete_webhook(drop_pending_updates=True)
+        await application.bot.set_webhook(url=webhook_url)
+
+    asyncio.get_event_loop().run_until_complete(setup_webhook())
+
+    # Запускаем встроенный web-server из python-telegram-bot
     application.run_webhook(
         port=port,
         webhook_url=webhook_url,
-        webhook_path=webhook_path,
     )
